@@ -46,6 +46,35 @@ Lee el diccionario de un idioma.
 | `search` | string | Filtra por coincidencia parcial en `original` |
 | `status` | int | `0` sin traducir · `1` traducción automática · `2` revisado |
 
+### `GET /slugs`
+
+Lista los slugs originales con su traduccion en un idioma, si la tienen. Acepta
+`language` (obligatorio), `limit`, `offset` y `search`.
+
+### `POST /slugs`
+
+Escribe slugs traducidos. Maximo 200 por llamada.
+
+```json
+{
+  "language": "es_ES",
+  "status": 2,
+  "pairs": [
+    { "original": "nuru-massage-sensory-awareness", "translated": "masaje-nuru-guia-completa" }
+  ]
+}
+```
+
+Se puede direccionar por `original` (el slug en el idioma por defecto) o por
+`original_id`. Cada slug se valida con `sanitize_title()` antes de escribir: uno con
+espacios, mayusculas o barras rompe la URL en silencio, asi que se rechaza y se
+devuelve la forma corregida en `invalidos`. Al terminar se refrescan las reglas de
+reescritura, sin lo cual la URL nueva daria 404.
+
+**No hace falta crear redirecciones.** TranslatePress emite por su cuenta un 301
+desde la URL con el slug original hacia la traducida, y actualiza el canonical y el
+hreflang. La URL del idioma por defecto no se toca.
+
 ### `POST /translate`
 
 Publica traducciones. Máximo 500 pares por llamada.
