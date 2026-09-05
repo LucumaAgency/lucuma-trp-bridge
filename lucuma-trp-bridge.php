@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Lucuma TRP Bridge
  * Description: Expone la base de traducciones de TranslatePress por REST para poder leer los originales y publicar traducciones revisadas.
- * Version:     1.0.0
+ * Version:     1.1.0
  * Author:      Lucuma Agency
  */
 
@@ -187,7 +187,8 @@ function lucuma_trp_translate( WP_REST_Request $req ) {
 	$dry_run = (bool) $req->get_param( 'dry_run' );
 
 	$res = array( 'table' => $table, 'status_escrito' => $status, 'dry_run' => $dry_run,
-	              'actualizados' => 0, 'sin_cambio' => 0, 'no_encontrados' => array(), 'errores' => array() );
+	              'actualizados' => 0, 'sin_cambio' => 0, 'ids' => array(),
+	              'no_encontrados' => array(), 'errores' => array() );
 
 	foreach ( $pairs as $i => $p ) {
 		$orig = isset( $p['original'] ) ? (string) $p['original'] : '';
@@ -198,8 +199,12 @@ function lucuma_trp_translate( WP_REST_Request $req ) {
 			continue;
 		}
 
+		// BINARY es imprescindible: la colacion por defecto de MySQL ignora
+		// mayusculas, y TranslatePress guarda como filas distintas el enlace
+		// del indice y el encabezado que solo se diferencian en la capitalizacion.
+		// Sin BINARY se actualiza la fila equivocada en silencio.
 		$row = $wpdb->get_row(
-			$wpdb->prepare( "SELECT id, translated, status FROM `$table` WHERE original = %s LIMIT 1", $orig ),
+			$wpdb->prepare( "SELECT id, translated, status FROM `$table` WHERE BINARY original = %s LIMIT 1", $orig ),
 			ARRAY_A
 		);
 
@@ -228,6 +233,7 @@ function lucuma_trp_translate( WP_REST_Request $req ) {
 			$res['errores'][] = array( 'i' => $i, 'motivo' => $wpdb->last_error );
 		} else {
 			$res['actualizados']++;
+			$res['ids'][] = (int) $row['id'];
 		}
 	}
 

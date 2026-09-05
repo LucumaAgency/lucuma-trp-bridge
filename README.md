@@ -77,6 +77,14 @@ El orden de trabajo que se deduce de esto: recorrer las URLs traducidas para que
 TranslatePress registre los originales, leerlos con `/strings`, y solo entonces
 escribir contra la cadena real.
 
+**El emparejamiento es binario, sensible a mayusculas.**
+
+La colacion por defecto de MySQL ignora las mayusculas, y TranslatePress guarda como
+filas distintas el enlace del indice y el encabezado de seccion cuando solo se
+diferencian en la capitalizacion (`Available rituals in Palma` frente a
+`Available Rituals in Palma`). Sin `BINARY` en la consulta se actualiza la fila
+equivocada en silencio y la pagina sigue mostrando el original. Corregido en 1.1.0.
+
 **Escribe `status = 2` por defecto, revisado por humano.**
 
 Es el estado que TranslatePress respeta: la traducción automática no lo sobrescribe.
