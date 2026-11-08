@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Lucuma TRP Bridge
  * Description: Expone la base de traducciones de TranslatePress por REST para poder leer los originales y publicar traducciones revisadas.
- * Version:     1.2.0
+ * Version:     1.3.0
  * Author:      Lucuma Agency
  */
 
@@ -337,7 +337,8 @@ function lucuma_trp_set_slugs( WP_REST_Request $req ) {
 	foreach ( $pairs as $i => $p ) {
 		$new = isset( $p['translated'] ) ? (string) $p['translated'] : '';
 		$new = trim( $new, "/ 	
-" );
+
+" );
 
 		// Un slug con espacios, mayusculas o barras rompe la URL en silencio.
 		if ( '' === $new || $new !== sanitize_title( $new ) ) {
@@ -407,6 +408,96 @@ function lucuma_trp_set_slugs( WP_REST_Request $req ) {
 }
 
 /* ------------------------------------------------------------------ *
+ *  POST /media  — imagen distinta por idioma (v1.3.0)
+ *
+ *  TranslatePress busca en el diccionario el src de cada <img>, pero fuera
+ *  de su editor visual NUNCA inserta esas filas (evita llenar la base con
+ *  URLs dinamicas). Esta ruta crea la fila con la funcion de TranslatePress
+ *  (insert_strings, que tambien sincroniza trp_original_strings) y la deja
+ *  traducida con status 2. Solo acepta URLs de imagen del propio sitio.
+ *  pairs: [{original: URL tal cual sale en el src, translated: URL nueva}]
+ * ------------------------------------------------------------------ */
+function lucuma_trp_media_url_ok( $url ) {
+	$home = wp_parse_url( home_url(), PHP_URL_HOST );
+	$host = wp_parse_url( $url, PHP_URL_HOST );
+	return $host && $home && strtolower( $host ) === strtolower( $home )
+		&& preg_match( '#/wp-content/uploads/.+\.(png|jpe?g|webp|gif|svg|avif)$#i', $url );
+}
+
+function lucuma_trp_media( WP_REST_Request $req ) {
+	global $wpdb;
+
+	$lang  = (string) $req->get_param( 'language' );
+	$valid = lucuma_trp_validate_language( $lang );
+	if ( is_wp_error( $valid ) ) {
+		return $valid;
+	}
+	$table = lucuma_trp_table( $lang );
+	if ( ! lucuma_trp_table_exists( $table ) ) {
+		return new WP_Error( 'lucuma_trp_no_table', "No existe la tabla $table.", array( 'status' => 404 ) );
+	}
+	$pairs = $req->get_param( 'pairs' );
+	if ( ! is_array( $pairs ) || empty( $pairs ) || count( $pairs ) > 300 ) {
+		return new WP_Error( 'lucuma_trp_pairs', 'Falta "pairs" (1 a 300 pares {original, translated}).', array( 'status' => 400 ) );
+	}
+	$dry_run = (bool) $req->get_param( 'dry_run' );
+
+	$res = array( 'table' => $table, 'dry_run' => $dry_run, 'insertados' => 0, 'actualizados' => 0,
+	              'sin_cambio' => 0, 'invalidos' => array(), 'errores' => array() );
+
+	$query = null;
+	if ( class_exists( 'TRP_Translate_Press' ) ) {
+		$query = TRP_Translate_Press::get_trp_instance()->get_component( 'query' );
+	}
+	if ( ! $query ) {
+		return new WP_Error( 'lucuma_trp_no_trp', 'TranslatePress no esta cargado.', array( 'status' => 500 ) );
+	}
+
+	foreach ( $pairs as $i => $p ) {
+		$orig = isset( $p['original'] ) ? trim( (string) $p['original'] ) : '';
+		$new  = isset( $p['translated'] ) ? trim( (string) $p['translated'] ) : '';
+		if ( ! lucuma_trp_media_url_ok( $orig ) || ! lucuma_trp_media_url_ok( $new ) ) {
+			$res['invalidos'][] = array( 'i' => $i, 'original' => $orig );
+			continue;
+		}
+		$row = $wpdb->get_row(
+			$wpdb->prepare( "SELECT id, translated, status FROM `$table` WHERE BINARY original = %s LIMIT 1", $orig ),
+			ARRAY_A
+		);
+		if ( $row && $row['translated'] === $new && 2 === (int) $row['status'] ) {
+			$res['sin_cambio']++;
+			continue;
+		}
+		if ( $dry_run ) {
+			$row ? $res['actualizados']++ : $res['insertados']++;
+			continue;
+		}
+		if ( ! $row ) {
+			$query->insert_strings( array( $orig ), $lang );
+			$row = $wpdb->get_row(
+				$wpdb->prepare( "SELECT id FROM `$table` WHERE BINARY original = %s LIMIT 1", $orig ),
+				ARRAY_A
+			);
+			if ( ! $row ) {
+				$res['errores'][] = array( 'i' => $i, 'motivo' => 'no se pudo insertar: ' . $wpdb->last_error );
+				continue;
+			}
+			$res['insertados']++;
+		} else {
+			$res['actualizados']++;
+		}
+		$wpdb->update( $table, array( 'translated' => $new, 'status' => 2 ), array( 'id' => (int) $row['id'] ),
+			array( '%s', '%d' ), array( '%d' ) );
+	}
+
+	if ( ! $dry_run && ( $res['insertados'] + $res['actualizados'] ) > 0 && function_exists( 'rocket_clean_domain' ) ) {
+		rocket_clean_domain();
+		$res['cache_purgada'] = true;
+	}
+	return rest_ensure_response( $res );
+}
+
+/* ------------------------------------------------------------------ *
  *  Rutas
  * ------------------------------------------------------------------ */
 add_action( 'rest_api_init', function () {
@@ -463,6 +554,16 @@ add_action( 'rest_api_init', function () {
 				'status'   => array( 'type' => 'integer' ),
 				'dry_run'  => array( 'type' => 'boolean' ),
 			),
+		),
+	) );
+	register_rest_route( LUCUMA_TRP_NS, '/media', array(
+		'methods'             => 'POST',
+		'callback'            => 'lucuma_trp_media',
+		'permission_callback' => 'lucuma_trp_can',
+		'args'                => array(
+			'language' => array( 'required' => true, 'type' => 'string' ),
+			'pairs'    => array( 'required' => true, 'type' => 'array' ),
+			'dry_run'  => array( 'type' => 'boolean' ),
 		),
 	) );
 } );

@@ -92,6 +92,24 @@ Publica traducciones. Máximo 500 pares por llamada.
 
 Devuelve `actualizados`, `sin_cambio`, `no_encontrados` y `errores`.
 
+
+### `POST /media` (desde 1.3.0)
+
+Imagen distinta por idioma. TranslatePress busca en el diccionario el `src` de cada
+`<img>`, pero fuera de su editor visual nunca crea esas filas. Esta ruta las crea con la
+función de TranslatePress (`insert_strings`) y las deja traducidas con status 2.
+
+```json
+{ "language": "en_US", "dry_run": true,
+  "pairs": [{ "original": "https://sitio/wp-content/uploads/2026/09/x.png",
+              "translated": "https://sitio/wp-content/uploads/2026/11/x-en.png" }] }
+```
+
+Solo acepta URLs de `/wp-content/uploads/` del mismo dominio (máx. 300 por llamada).
+`original` debe ser el `src` exacto que imprime la página. El `srcset` lo regenera
+TranslatePress a partir del adjunto de la URL traducida, así que la imagen nueva debe
+estar subida a la biblioteca de medios.
+
 ## Dos decisiones de diseño
 
 **Solo actualiza originales que ya existen; nunca los inventa.**
